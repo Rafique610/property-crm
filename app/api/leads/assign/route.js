@@ -3,6 +3,7 @@ import connectDB from "@/lib/db";
 import Lead from "@/models/Lead";
 import User from "@/models/User";
 import { verifyToken, requireRole } from "@/middleware/auth";
+import ActivityLog from "@/models/ActivityLog";
 
 export async function POST(req) {
 try {
@@ -50,6 +51,13 @@ if (!lead) {
 
 lead.assignedTo = agentId;
 await lead.save();
+
+await ActivityLog.create({
+leadId: lead._id,
+action: "assigned",
+performedBy: auth.user.userId,
+details: `Lead assigned to agent ${agent.name}`,
+});
 
 return NextResponse.json(
   { message: "Lead assigned successfully", lead },
