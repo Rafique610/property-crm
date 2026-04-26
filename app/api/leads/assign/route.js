@@ -1,73 +1,55 @@
+// FILE: app/api/leads/assign/route.js
+// Changes from original:
+//   ✅ Email notification to assigned agent
+
 import { NextResponse } from "next/server";
 import connectDB from "@/lib/db";
 import Lead from "@/models/Lead";
 import User from "@/models/User";
 import { verifyToken, requireRole } from "@/middleware/auth";
 import ActivityLog from "@/models/ActivityLog";
+import { sendLeadAssignedEmail } from "@/lib/email";
 
 export async function POST(req) {
-try {
-const auth = verifyToken(req);
+  try {
+    const auth = verifyToken(req);
+    if (auth.error) return NextResponse.json({ message: auth.error }, { status: auth.status });
 
-if (auth.error) {
-  return NextResponse.json(
-    { message: auth.error },
-    { status: auth.status }
-  );
-}
+    const roleCheck = requireRole(auth.user, "admin");
+    if (roleCheck) return roleCheck;
 
-// Only admin allowed
-const roleCheck = requireRole(auth.user, "admin");
-if (roleCheck) return roleCheck;
+    const { leadId, agentId } = await req.json();
+    if (!leadId || !agentId) {
+      return NextResponse.json({ message: "leadId and agentId are required" }, { status: 400 });
+    }
 
-const { leadId, agentId } = await req.json();
+    await connectDB();
 
-if (!leadId || !agentId) {
-  return NextResponse.json(
-    { message: "leadId and agentId are required" },
-    { status: 400 }
-  );
-}
+    const agent = await User.findById(agentId);
+    if (!agent || agent.role !== "agent") {
+      return NextResponse.json({ message: "Invalid agent" }, { status: 400 });
+    }
 
-await connectDB();
+    const lead = await Lead.findById(leadId);
+    if (!lead) {
+      return NextResponse.json({ message: "Lead not found" }, { status: 404 });
+    }
 
-const agent = await User.findById(agentId);
+    lead.assignedTo = agentId;
+    await lead.save();
 
-if (!agent || agent.role !== "agent") {
-  return NextResponse.json(
-    { message: "Invalid agent" },
-    { status: 400 }
-  );
-}
+    await ActivityLog.create({
+      leadId: lead._id,
+      action: "assigned",
+      performedBy: auth.user.userId,
+      details: `Lead assigned to agent ${agent.name}`,
+    });
 
-const lead = await Lead.findById(leadId);
+    // ✅ Email notification to the assigned agent
+    await sendLeadAssignedEmail(lead, agent);
 
-if (!lead) {
-  return NextResponse.json(
-    { message: "Lead not found" },
-    { status: 404 }
-  );
-}
-
-lead.assignedTo = agentId;
-await lead.save();
-
-await ActivityLog.create({
-leadId: lead._id,
-action: "assigned",
-performedBy: auth.user.userId,
-details: `Lead assigned to agent ${agent.name}`,
-});
-
-return NextResponse.json(
-  { message: "Lead assigned successfully", lead },
-  { status: 200 }
-);
-
-} catch (error) {
-return NextResponse.json(
-{ message: "Server error", error: error.message },
-{ status: 500 }
-);
-}
+    return NextResponse.json({ message: "Lead assigned successfully", lead }, { status: 200 });
+  } catch (error) {
+    return NextResponse.json({ message: "Server error", error: error.message }, { status: 500 });
+  }
 }
