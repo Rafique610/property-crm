@@ -72,6 +72,7 @@ if (assignedTo) {
   changes.push("Lead reassigned");
 }
 
+lead.lastActivity = new Date();
 await lead.save();
 
 // Activity log
