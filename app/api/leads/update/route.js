@@ -60,7 +60,14 @@ if (notes) {
 }
 
 // Admin-only assignment
-if (assignedTo && auth.user.role === "admin") {
+if (assignedTo) {
+  if (auth.user.role !== "admin") {
+    return NextResponse.json(
+      { message: "Only admin can reassign leads" },
+      { status: 403 }
+    );
+  }
+
   lead.assignedTo = assignedTo;
   changes.push("Lead reassigned");
 }
