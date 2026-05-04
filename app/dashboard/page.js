@@ -1,6 +1,7 @@
 // FILE: app/dashboard/page.js
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 
 const styles = {
   root: { minHeight: "100vh", background: "#0f172a", color: "#e2e8f0", fontFamily: "'DM Sans', sans-serif" },
@@ -46,14 +47,15 @@ function DonutChart({ data, colors, total }) {
   const strokeWidth = 26;
   const circumference = 2 * Math.PI * r;
 
-  let cumulative = 0;
-  const segments = data.map((item) => {
+  const { segments } = data.reduce(({ segments, cumulative }, item) => {
     const pct = total > 0 ? item.count / total : 0;
     const dashOffset = circumference - pct * circumference;
     const rotation = cumulative * 360 - 90;
-    cumulative += pct;
-    return { ...item, dashOffset, rotation, pct };
-  });
+    return {
+      cumulative: cumulative + pct,
+      segments: [...segments, { ...item, dashOffset, rotation, pct }],
+    };
+  }, { segments: [], cumulative: 0 });
 
   const hoveredSeg = segments.find((s) => s._id === hovered);
 
@@ -122,39 +124,56 @@ function DonutChart({ data, colors, total }) {
 // ── Bar Chart (SVG, no library needed) ───────────────────────────────────────
 function BarChart({ data, colors, total }) {
   const [hovered, setHovered] = useState(null);
-  const chartH = 130;
-  const barW = 64;
-  const gap = 28;
-  const padL = 16;
-  const chartW = padL + data.length * (barW + gap);
+ 
+  const chartH = 160;       // height of the bar drawing area
+  const barW   = 72;        // width of each bar
+  const gap    = 40;        // gap between bars
+  const padL   = 20;        // left padding
+  const padTop = 30;        // space above bars for the count label
+  const padBot = 48;        // space below bars for label + percentage
+ 
+  const svgW = padL + data.length * (barW + gap);
+  const svgH = padTop + chartH + padBot;
+ 
   const maxVal = Math.max(...data.map((d) => d.count), 1);
-
+ 
   return (
-    <svg width="100%" viewBox={`0 0 ${chartW} ${chartH + 52}`} style={{ overflow: "visible" }}>
+    <svg
+      width="100%"
+      viewBox={`0 0 ${svgW} ${svgH}`}
+      style={{ overflow: "visible", display: "block" }}
+    >
       <defs>
         <filter id="barGlow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="5" result="blur" />
-          <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          <feGaussianBlur stdDeviation="4" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
         </filter>
       </defs>
-
+ 
       {/* Horizontal guide lines */}
       {[0.25, 0.5, 0.75, 1].map((pct) => (
         <line
           key={pct}
-          x1={0} y1={chartH - pct * chartH}
-          x2={chartW} y2={chartH - pct * chartH}
-          stroke="rgba(255,255,255,0.04)" strokeWidth="1"
+          x1={0}
+          y1={padTop + chartH - pct * chartH}
+          x2={svgW}
+          y2={padTop + chartH - pct * chartH}
+          stroke="rgba(255,255,255,0.05)"
+          strokeWidth="1"
         />
       ))}
-
+ 
       {data.map((item, i) => {
-        const barH = Math.max((item.count / maxVal) * chartH, 4);
-        const x = padL + i * (barW + gap);
-        const y = chartH - barH;
+        const barH  = Math.max((item.count / maxVal) * chartH, 4);
+        const x     = padL + i * (barW + gap);
+        // bar bottom = padTop + chartH, bar top = bottom - barH
+        const barY  = padTop + chartH - barH;
         const color = colors[item._id] || "#64748b";
         const isHov = hovered === item._id;
-
+ 
         return (
           <g
             key={item._id || i}
@@ -162,18 +181,67 @@ function BarChart({ data, colors, total }) {
             onMouseLeave={() => setHovered(null)}
             style={{ cursor: "pointer" }}
           >
-            {/* Bar track */}
-            <rect x={x} y={0} width={barW} height={chartH} rx={8} fill="rgba(255,255,255,0.03)" />
-            {/* Bar fill */}
-            <rect x={x} y={y} width={barW} height={barH} rx={8} fill={color} opacity={isHov ? 1 : 0.7} filter={isHov ? "url(#barGlow)" : undefined} style={{ transition: "opacity 0.2s" }} />
-            {/* Gradient shine */}
-            <rect x={x} y={y} width={barW} height={Math.min(barH / 2, 30)} rx={8} fill="rgba(255,255,255,0.1)" />
-            {/* Count above bar */}
-            <text x={x + barW / 2} y={y - 8} textAnchor="middle" fill={color} fontSize="14" fontWeight="700" fontFamily="'Syne', sans-serif">{item.count}</text>
-            {/* Label below */}
-            <text x={x + barW / 2} y={chartH + 18} textAnchor="middle" fill="#cbd5e1" fontSize="11" fontFamily="'DM Sans', sans-serif">{item._id || "?"}</text>
-            {/* Percentage */}
-            <text x={x + barW / 2} y={chartH + 34} textAnchor="middle" fill="#475569" fontSize="10" fontFamily="'DM Sans', sans-serif">
+            {/* Track (full height background) */}
+            <rect
+              x={x} y={padTop}
+              width={barW} height={chartH}
+              rx={8}
+              fill="rgba(255,255,255,0.03)"
+            />
+ 
+            {/* Bar fill — grows from bottom */}
+            <rect
+              x={x} y={barY}
+              width={barW} height={barH}
+              rx={8}
+              fill={color}
+              opacity={isHov ? 1 : 0.75}
+              filter={isHov ? "url(#barGlow)" : undefined}
+              style={{ transition: "opacity 0.2s" }}
+            />
+ 
+            {/* Shine on top portion of bar only */}
+            <rect
+              x={x} y={barY}
+              width={barW} height={Math.min(barH / 2, 24)}
+              rx={8}
+              fill="rgba(255,255,255,0.08)"
+            />
+ 
+            {/* Count label — always just above the bar */}
+            <text
+              x={x + barW / 2}
+              y={barY - 8}
+              textAnchor="middle"
+              fill={color}
+              fontSize="16"
+              fontWeight="700"
+              fontFamily="'Syne', sans-serif"
+            >
+              {item.count}
+            </text>
+ 
+            {/* Category label — below the track */}
+            <text
+              x={x + barW / 2}
+              y={padTop + chartH + 20}
+              textAnchor="middle"
+              fill="#cbd5e1"
+              fontSize="12"
+              fontFamily="'DM Sans', sans-serif"
+            >
+              {item._id || "?"}
+            </text>
+ 
+            {/* Percentage — below category label */}
+            <text
+              x={x + barW / 2}
+              y={padTop + chartH + 38}
+              textAnchor="middle"
+              fill="#475569"
+              fontSize="11"
+              fontFamily="'DM Sans', sans-serif"
+            >
               {total > 0 ? Math.round((item.count / total) * 100) : 0}%
             </text>
           </g>
@@ -223,9 +291,9 @@ function AgentPerformanceChart({ agentStats }) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
+  const router = useRouter();
   const [user, setUser] = useState(null);
   const [leads, setLeads] = useState([]);
-  const [filteredLeads, setFilteredLeads] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [insights, setInsights] = useState(null);
   const [agents, setAgents] = useState([]);
@@ -242,53 +310,38 @@ export default function Dashboard() {
   const [savingNotes, setSavingNotes] = useState({});
   const [newLead, setNewLead] = useState({ name: "", email: "", phone: "", propertyInterest: "", budget: "", notes: "" });
 
-  useEffect(() => {
-    fetchUser();
-    fetchLeads();
-    const interval = setInterval(fetchLeads, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => { applyFilters(); }, [leads, statusFilter, priorityFilter, searchFilter]);
-
-  const fetchUser = async () => {
-    const res = await fetch("/api/auth/me", { credentials: "include" });
-    const data = await res.json();
-    if (!res.ok) { window.location.href = "/login"; return; }
-    setUser(data.user);
-    fetchInsights(); // all roles need insights
-    if (data.user.role === "admin") { fetchAnalytics(); fetchAgents(); }
-  };
-
   const fetchLeads = useCallback(async () => {
     const res = await fetch("/api/leads", { credentials: "include" });
     const data = await res.json();
     setLeads(data.leads || []);
   }, []);
 
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     const res = await fetch("/api/leads/analytics", { credentials: "include" });
     setAnalytics(await res.json());
-  };
+  }, []);
 
-  const fetchInsights = async () => {
+  const fetchInsights = useCallback(async () => {
     const res = await fetch("/api/leads/insights", { credentials: "include" });
     setInsights(await res.json());
-  };
+  }, []);
 
-  const fetchAgents = async () => {
+  const fetchAgents = useCallback(async () => {
     const res = await fetch("/api/users/agents", { credentials: "include" });
     const data = await res.json();
     setAgents(data.agents || []);
-  };
+  }, []);
 
-  const fetchActivityLog = async (leadId) => {
-    const res = await fetch(`/api/leads/${leadId}/activity`, { credentials: "include" });
+  const fetchUser = useCallback(async () => {
+    const res = await fetch("/api/auth/me", { credentials: "include" });
     const data = await res.json();
-    setActivityLog((prev) => ({ ...prev, [leadId]: data.logs || [] }));
-  };
+    if (!res.ok) { router.replace("/login"); return; }
+    setUser(data.user);
+    fetchInsights(); // all roles need insights
+    if (data.user.role === "admin") { fetchAnalytics(); fetchAgents(); }
+  }, [fetchAgents, fetchAnalytics, fetchInsights, router]);
 
-  const applyFilters = () => {
+  const filteredLeads = useMemo(() => {
     let result = [...leads];
     if (statusFilter) result = result.filter((l) => l.status === statusFilter);
     if (priorityFilter) result = result.filter((l) => l.score === priorityFilter);
@@ -296,7 +349,21 @@ export default function Dashboard() {
       const q = searchFilter.toLowerCase();
       result = result.filter((l) => l.name?.toLowerCase().includes(q) || l.email?.toLowerCase().includes(q) || l.propertyInterest?.toLowerCase().includes(q));
     }
-    setFilteredLeads(result);
+    return result;
+  }, [leads, priorityFilter, searchFilter, statusFilter]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchUser();
+    fetchLeads();
+    const interval = setInterval(fetchLeads, 30000);
+    return () => clearInterval(interval);
+  }, [fetchLeads, fetchUser]);
+
+  const fetchActivityLog = async (leadId) => {
+    const res = await fetch(`/api/leads/${leadId}/activity`, { credentials: "include" });
+    const data = await res.json();
+    setActivityLog((prev) => ({ ...prev, [leadId]: data.logs || [] }));
   };
 
   const createLead = async () => {
@@ -348,7 +415,7 @@ export default function Dashboard() {
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    window.location.href = "/login";
+    router.replace("/login");
   };
 
   const formatCurrency = (n) =>

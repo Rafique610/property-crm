@@ -192,7 +192,7 @@ export default function SignupPage() {
             Create Account
           </h2>
           <p style={{ color: "#475569", fontSize: "0.875rem", margin: "0 0 2rem 0" }}>
-            You'll be registered as an <span style={{ color: "#818cf8" }}>Agent</span> by default
+            You&apos;ll be registered as an <span style={{ color: "#818cf8" }}>Agent</span> by default
           </p>
 
           {error && (
